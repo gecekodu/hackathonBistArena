@@ -1,25 +1,44 @@
+import { AlertTriangle, Info, CheckCircle2 } from 'lucide-react';
 import type { InsightItem } from '../types';
 
 type InsightCardProps = {
   insight: InsightItem;
 };
 
-const severityStyle: Record<InsightItem['severity'], string> = {
-  low: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
-  medium: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
-  high: 'border-rose-500/30 bg-rose-500/10 text-rose-200',
+const severityConfig: Record<InsightItem['severity'], { bg: string; text: string; border: string; icon: typeof Info }> = {
+  low: { bg: 'bg-arena-successLight', text: 'text-arena-success', border: 'border-arena-success/20', icon: CheckCircle2 },
+  medium: { bg: 'bg-arena-amberLight', text: 'text-arena-amber', border: 'border-arena-amber/20', icon: Info },
+  high: { bg: 'bg-arena-dangerLight', text: 'text-arena-danger', border: 'border-arena-danger/20', icon: AlertTriangle },
+};
+
+const severityLabel: Record<InsightItem['severity'], string> = {
+  low: 'Düşük',
+  medium: 'Orta',
+  high: 'Yüksek',
 };
 
 export function InsightCard({ insight }: InsightCardProps) {
+  const config = severityConfig[insight.severity];
+  const Icon = config.icon;
+
   return (
-    <article className="rounded-3xl border border-white/10 bg-slate-950/40 p-5 shadow-soft backdrop-blur-xl transition duration-300 hover:border-white/20">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-base font-semibold text-white">{insight.title}</h3>
-        <span className={`rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.24em] ${severityStyle[insight.severity]}`}>
-          {insight.severity}
+    <article className="arena-card p-5 transition duration-300 hover:border-arena-borderHover">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className={`grid h-9 w-9 flex-shrink-0 place-items-center rounded-lg ${config.bg}`}>
+            <Icon className={`h-4 w-4 ${config.text}`} />
+          </div>
+          <h3 className="text-sm font-semibold text-arena-text">{insight.title}</h3>
+        </div>
+        <span
+          className={`arena-badge ${config.bg} ${config.text} border ${config.border}`}
+        >
+          {severityLabel[insight.severity]}
         </span>
       </div>
-      <p className="mt-4 text-sm leading-6 text-slate-300">{insight.description}</p>
+      <p className="mt-3 pl-12 text-sm leading-relaxed text-arena-textSecondary">
+        {insight.description}
+      </p>
     </article>
   );
 }

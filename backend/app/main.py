@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from .services.firebase import get_firebase_status, persist_trade_snapshot
 from .services.gemini import build_ai_coach_report, get_gemini_status
 from .services.coingecko import get_crypto_prices
-from .services.bist import get_all_bist_prices, load_symbols
+from .services.bist import get_all_bist_prices, load_symbols, get_market_news
 
 app = FastAPI(title='BISTMind AI API', version='0.1.0')
 
@@ -31,13 +31,16 @@ market = {}
 # İlk yükleme: bist_symbols.txt dosyasındaki semboller varsa canlı fiyatları çek
 try:
     bist_prices = get_all_bist_prices()
-    for symbol, info in bist_prices.items():
-        market[symbol] = {
-            'name': info.get('name') or symbol,
-            'sector': 'Çeşitli',
-            'price': info.get('price', 0),
-            'change_pct': info.get('change_pct', 0),
-        }
+    if bist_prices:
+        for symbol, info in bist_prices.items():
+            market[symbol] = {
+                'name': info.get('name') or symbol,
+                'sector': 'Çeşitli',
+                'price': info.get('price', 0),
+                'change_pct': info.get('change_pct', 0),
+            }
+    else:
+        raise ValueError('Boş fiyat listesi')
 except Exception:
     # fallback: küçük demo list
     market = {
@@ -48,6 +51,7 @@ except Exception:
         'TUPRS': {'name': 'Tüpraş', 'sector': 'Enerji', 'price': 196.5, 'change_pct': -1.4},
         'SAHOL': {'name': 'Sabancı Holding', 'sector': 'Holding', 'price': 92.4, 'change_pct': 0.9},
     }
+
 
 state = {
     'cash': INITIAL_CASH,
@@ -206,6 +210,10 @@ def refresh_market() -> dict:
     return {'updated': len(prices)}
 
 
+@app.get('/api/news')
+def get_news() -> list[dict]:
+    return get_market_news()
+
 @app.get('/api/market/{symbol}/stats')
 def market_symbol_stats(symbol: str) -> dict:
     """Return enriched stats for a single BIST symbol: daily/weekly/monthly changes and recent history.
@@ -285,9 +293,9 @@ def build_dashboard() -> dict:
         'holdings': holdings_out,
         'trades': list(state['trades'])[:8],
         'leaderboard': [
-            {'rank': 1, 'name': 'AnkaraQuant', 'returnPct': 18.4, 'disciplineScore': 92, 'badge': 'Most Disciplined Investor'},
-            {'rank': 2, 'name': 'IstanbulAlpha', 'returnPct': 16.1, 'disciplineScore': 87, 'badge': 'Best Diversifier'},
-            {'rank': 3, 'name': 'BISTMind_User', 'returnPct': round(max((portfolio_value - INITIAL_CASH) / INITIAL_CASH * 100, 0), 1), 'disciplineScore': insight_data['disciplineScore'], 'badge': 'Momentum Runner'},
+            {'rank': 1, 'name': 'AnkaraQuant', 'returnPct': 18.4, 'disciplineScore': 92, 'badge': 'En Disiplinli Yatırımcı'},
+            {'rank': 2, 'name': 'IstanbulAlpha', 'returnPct': 16.1, 'disciplineScore': 87, 'badge': 'En İyi Çeşitlendirici'},
+            {'rank': 3, 'name': 'BorsaArena_User', 'returnPct': round(max((portfolio_value - INITIAL_CASH) / INITIAL_CASH * 100, 0), 1), 'disciplineScore': insight_data['disciplineScore'], 'badge': 'Momentum Koşucusu'},
         ],
         'insights': insight_data['insights'],
         'coach': insight_data['coach'],
@@ -335,33 +343,33 @@ def analyze_behavior(trades: list[dict], holdings_out: list[dict], sector_weight
     insights = []
     if sell_count > buy_count and any(trade['side'] == 'SELL' for trade in trades[:3]):
         insights.append({
-            'title': 'Panic Selling',
+            'title': 'Panik Satış Eğilimi',
             'description': 'Son işlemlerde baskı anında pozisyon kapatma eğilimi görünüyor. Karar anında biraz daha beklemek davranış kaliteni artırabilir.',
             'severity': 'high',
         })
     else:
         insights.append({
-            'title': 'Steady Execution',
+            'title': 'İstikrarlı İşlem',
             'description': 'İşlemlerinin önemli bir kısmı planlı görünüyor. Bu ritmi korursan davranışsal puanın daha istikrarlı kalır.',
             'severity': 'low',
         })
 
     if concentration > 0.45:
         insights.append({
-            'title': 'Concentration Risk',
+            'title': 'Yoğunlaşma Riski',
             'description': 'Portföyün tek bir sektörde yoğunlaşıyor. Bu, haber akışı geldiğinde duygusal dalgalanmayı artırabilir.',
             'severity': 'medium',
         })
     else:
         insights.append({
-            'title': 'Diversification Pulse',
+            'title': 'Çeşitlendirme Analizi',
             'description': 'Dağılım yapın fena değil ancak birkaç ek sektör ile portföy dayanıklılığını artırabilirsin.',
             'severity': 'medium',
         })
 
     if len(trades) > 6:
         insights.append({
-            'title': 'Overtrading Watch',
+            'title': 'Aşırı İşlem Uyarısı',
             'description': 'İşlem sıklığı artıyor. Daha az ama daha planlı işlem, davranış notunu yükseltir.',
             'severity': 'medium',
         })
@@ -408,11 +416,11 @@ def build_warnings(trades: list[dict], holdings_out: list[dict], concentration: 
 
 def detect_emotion_tag(side: str, symbol: str, quantity: int) -> str:
     if side == 'SELL' and quantity >= 200:
-        return 'Panic risk'
+        return 'Panik riski'
     if side == 'BUY' and symbol in {'THYAO', 'ASELS'}:
-        return 'Momentum signal'
+        return 'Momentum sinyali'
     if quantity >= 300:
-        return 'High conviction'
+        return 'Yüksek inanç'
     return 'Planlı karar'
 
 

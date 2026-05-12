@@ -10,15 +10,23 @@ type MetricCardProps = {
 
 export function MetricCard({ title, value, subtitle, accent, icon }: MetricCardProps) {
   return (
-    <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-5 shadow-soft backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-white/20">
-      <div className={`absolute inset-x-0 top-0 h-1 ${accent}`} />
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-xs uppercase tracking-[0.32em] text-slate-400">{title}</p>
-          <p className="mt-3 font-display text-3xl font-extrabold text-white">{value}</p>
-          <p className="mt-2 text-sm text-slate-400">{subtitle}</p>
+    <div className="arena-card arena-card-lift relative overflow-hidden p-5">
+      {/* Left accent bar */}
+      <div className={`absolute left-0 top-3 bottom-3 w-1 rounded-r-full ${accent}`} />
+
+      <div className="flex items-start justify-between gap-4 pl-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-wider text-arena-textMuted">
+            {title}
+          </p>
+          <p className="mt-2 font-display text-2xl font-bold text-arena-text leading-tight">
+            {value}
+          </p>
+          <p className="mt-1.5 text-sm text-arena-textSecondary truncate">
+            {subtitle}
+          </p>
         </div>
-        <div className="grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-slate-950/40 text-cyan-300">
+        <div className="flex-shrink-0 grid h-11 w-11 place-items-center rounded-xl bg-arena-primaryLight text-arena-primary">
           {icon}
         </div>
       </div>

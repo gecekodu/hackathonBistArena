@@ -19,14 +19,14 @@ export const mockDashboard: DashboardData = {
     { id: 3, symbol: 'BIMAS', side: 'SELL', quantity: 40, price: 528.6, timestamp: 'Dün 10:05', emotionTag: 'Erken kar alma' },
   ],
   leaderboard: [
-    { rank: 1, name: 'AnkaraQuant', returnPct: 18.4, disciplineScore: 92, badge: 'Most Disciplined Investor' },
-    { rank: 2, name: 'IstanbulAlpha', returnPct: 16.1, disciplineScore: 87, badge: 'Best Diversifier' },
-    { rank: 3, name: 'BISTMind_User', returnPct: 12.7, disciplineScore: 84, badge: 'Momentum Runner' },
+    { rank: 1, name: 'AnkaraQuant', returnPct: 18.4, disciplineScore: 92, badge: 'En Disiplinli Yatırımcı' },
+    { rank: 2, name: 'IstanbulAlpha', returnPct: 16.1, disciplineScore: 87, badge: 'En İyi Çeşitlendirici' },
+    { rank: 3, name: 'BorsaArena_User', returnPct: 12.7, disciplineScore: 84, badge: 'Momentum Koşucusu' },
   ],
   insights: [
-    { title: 'Panic Selling', description: 'Son işlemlerde düşüş sonrası acele satış eğilimi var. Karar süresini biraz uzatıyorsun ama stres anında disiplin düşüyor.', severity: 'high' },
-    { title: 'Diversification Check', description: 'Portföyün bankacılık ve ulaştırma tarafında dengeli; enerji tarafı düşük kalmış.', severity: 'medium' },
-    { title: 'Overtrading Signal', description: 'Gün içi işlem sayısı arttığında performansın dalgalanıyor. Daha az ama daha planlı işlem daha iyi sonuç veriyor.', severity: 'medium' },
+    { title: 'Panik Satış Eğilimi', description: 'Son işlemlerde düşüş sonrası acele satış eğilimi var. Karar süresini uzatman faydalı olabilir.', severity: 'high' },
+    { title: 'Çeşitlendirme Analizi', description: 'Portföyün bankacılık ve ulaştırma tarafında dengeli; enerji tarafı düşük kalmış.', severity: 'medium' },
+    { title: 'Aşırı İşlem Sinyali', description: 'Gün içi işlem sayısı arttığında performansın dalgalanıyor. Daha az ama planlı işlem daha iyi sonuç veriyor.', severity: 'medium' },
   ],
   coach: {
     riskScore: 64,

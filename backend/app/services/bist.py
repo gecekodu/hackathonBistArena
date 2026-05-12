@@ -1,11 +1,11 @@
-"""BIST canlı fiyat servisi - Yahoo Finance kullanarak fiyat çeker."""
+"""BIST canlı fiyat servisi - yfinance kullanarak fiyat çeker."""
 
+import yfinance as yf
 import httpx
 from pathlib import Path
 from typing import List, Dict
+import xml.etree.ElementTree as ET
 
-YAHOO_QUOTE = "https://query1.finance.yahoo.com/v7/finance/quote"
-YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart"
 BASE_DIR = Path(__file__).resolve().parents[1]
 SYMBOLS_FILE = BASE_DIR / "data" / "bist_symbols.txt"
 
@@ -26,27 +26,32 @@ def get_bist_prices(symbols: list[str]) -> dict[str, dict]:
         return {}
 
     # Yahoo expects suffix .IS for Istanbul stocks
-    yahoo_symbols = ",".join(f"{s}.IS" for s in symbols)
+    yahoo_symbols = " ".join(f"{s}.IS" for s in symbols)
+    
+    out: dict[str, dict] = {}
     try:
-        with httpx.Client(timeout=10.0) as client:
-            resp = client.get(YAHOO_QUOTE, params={"symbols": yahoo_symbols})
-            resp.raise_for_status()
-            payload = resp.json()
-            results = payload.get("quoteResponse", {}).get("result", [])
-
-        out: dict[str, dict] = {}
-        for item in results:
-            sym = item.get("symbol", "").upper()
-            if sym.endswith('.IS'):
-                key = sym.replace('.IS', '')
-            else:
-                key = sym
-            price = item.get('regularMarketPrice') or 0
-            change = item.get('regularMarketChangePercent') or 0
-            out[key] = {"price": float(price), "change_pct": float(change), "name": item.get('shortName')}
+        tickers = yf.Tickers(yahoo_symbols)
+        for sym in symbols:
+            ticker_name = f"{sym}.IS"
+            try:
+                t = tickers.tickers.get(ticker_name)
+                if not t:
+                    continue
+                # fast_info is much faster and less prone to failures than .info
+                price = t.fast_info.get("lastPrice", 0)
+                prev_close = t.fast_info.get("previousClose", 0)
+                change_pct = ((price - prev_close) / prev_close * 100) if prev_close else 0
+                
+                out[sym] = {
+                    "price": float(price),
+                    "change_pct": round(float(change_pct), 2),
+                    "name": sym # Fallback to symbol name for speed
+                }
+            except Exception:
+                continue
         return out
     except Exception as e:
-        print(f"BIST fiyat çekme hatası: {e}")
+        print(f"yfinance BIST fiyat çekme hatası: {e}")
         return {}
 
 
@@ -56,28 +61,16 @@ def get_all_bist_prices() -> dict[str, dict]:
 
 
 def get_price_history(symbol: str, range: str = "1mo", interval: str = "1d") -> list[dict]:
-    """Return list of {'timestamp': int, 'close': float} for the given symbol.
-    symbol without .IS suffix. Uses Yahoo chart API.
-    """
-    ticker = f"{symbol}.IS"
+    """Return list of {'timestamp': int, 'close': float} for the given symbol."""
     try:
-        with httpx.Client(timeout=10.0) as client:
-            resp = client.get(f"{YAHOO_CHART}/{ticker}", params={"range": range, "interval": interval})
-            resp.raise_for_status()
-            payload = resp.json()
-            result = payload.get("chart", {}).get("result")
-            if not result:
-                return []
-            r = result[0]
-            timestamps = r.get("timestamp") or []
-            indicators = r.get("indicators", {}).get("quote", [])
-            closes = indicators[0].get("close") if indicators else []
-
+        ticker = yf.Ticker(f"{symbol}.IS")
+        hist = ticker.history(period=range, interval=interval)
+        if hist.empty:
+            return []
+            
         out = []
-        for t, c in zip(timestamps, closes):
-            if c is None:
-                continue
-            out.append({"timestamp": int(t), "close": float(c)})
+        for index, row in hist.iterrows():
+            out.append({"timestamp": int(index.timestamp()), "close": float(row["Close"])})
         return out
     except Exception as e:
         print(f"Price history hata: {e}")
@@ -100,7 +93,6 @@ def compute_period_changes(symbol: str) -> dict:
             # history is ordered oldest->newest
             closes = [p["close"] for p in history]
             latest_close = closes[-1]
-            # find index ~7 days ago (assume 7 from end if available)
             if len(closes) >= 8:
                 past7 = closes[-8]
                 weekly = (latest_close - past7) / past7 * 100 if past7 != 0 else None
@@ -110,6 +102,37 @@ def compute_period_changes(symbol: str) -> dict:
     except Exception:
         pass
 
-    return {"daily": round(daily, 2) if isinstance(daily, (int, float)) else None,
-            "weekly": round(weekly, 2) if isinstance(weekly, (int, float)) else None,
-            "monthly": round(monthly, 2) if isinstance(monthly, (int, float)) else None}
+    return {
+        "daily": round(daily, 2) if isinstance(daily, (int, float)) else None,
+        "weekly": round(weekly, 2) if isinstance(weekly, (int, float)) else None,
+        "monthly": round(monthly, 2) if isinstance(monthly, (int, float)) else None
+    }
+
+def get_market_news() -> list[dict]:
+    """Fetch economy news from TRT Haber RSS."""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get("https://www.trthaber.com/ekonomi_articles.rss")
+            resp.raise_for_status()
+            
+            # XML parsing
+            root = ET.fromstring(resp.content.decode("utf-8", errors="replace"))
+            items = root.findall('.//item')
+            
+            news_list = []
+            for item in items[:15]:  # Limit to 15 news
+                title = item.find('title')
+                link = item.find('link')
+                pubDate = item.find('pubDate')
+                description = item.find('description')
+                
+                news_list.append({
+                    "title": title.text if title is not None else "",
+                    "link": link.text if link is not None else "",
+                    "pubDate": pubDate.text if pubDate is not None else "",
+                    "description": description.text if description is not None else ""
+                })
+            return news_list
+    except Exception as e:
+        print(f"Haber çekme hatası: {e}")
+        return []

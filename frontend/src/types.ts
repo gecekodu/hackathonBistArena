@@ -60,6 +60,13 @@ export type IntegrationStatus = {
   projectId?: string | null;
 };
 
+export type NewsItem = {
+  title: string;
+  link: string;
+  pubDate: string;
+  description: string;
+};
+
 export type DashboardData = {
   market: StockItem[];
   holdings: Holding[];
