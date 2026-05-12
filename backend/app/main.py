@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 
 from .services.firebase import get_firebase_status, persist_trade_snapshot
 from .services.gemini import build_ai_coach_report, get_gemini_status
+from .services.coingecko import get_crypto_prices
+from .services.bist import get_all_bist_prices, load_symbols
 
 app = FastAPI(title='BISTMind AI API', version='0.1.0')
 
@@ -22,18 +24,41 @@ app.add_middleware(
 )
 
 INITIAL_CASH = 100_000.0
+INITIAL_CRYPTO_USDT = 10_000.0
 
-market = {
-    'THYAO': {'name': 'Türk Hava Yolları', 'sector': 'Ulaştırma', 'price': 304.4, 'change_pct': 2.1},
-    'ASELS': {'name': 'Aselsan', 'sector': 'Savunma', 'price': 88.3, 'change_pct': 1.7},
-    'BIMAS': {'name': 'BİM Mağazalar', 'sector': 'Perakende', 'price': 521.2, 'change_pct': -0.8},
-    'AKBNK': {'name': 'Akbank', 'sector': 'Bankacılık', 'price': 71.9, 'change_pct': 0.6},
-    'TUPRS': {'name': 'Tüpraş', 'sector': 'Enerji', 'price': 196.5, 'change_pct': -1.4},
-    'SAHOL': {'name': 'Sabancı Holding', 'sector': 'Holding', 'price': 92.4, 'change_pct': 0.9},
-}
+market = {}
+
+# İlk yükleme: bist_symbols.txt dosyasındaki semboller varsa canlı fiyatları çek
+try:
+    bist_prices = get_all_bist_prices()
+    for symbol, info in bist_prices.items():
+        market[symbol] = {
+            'name': info.get('name') or symbol,
+            'sector': 'Çeşitli',
+            'price': info.get('price', 0),
+            'change_pct': info.get('change_pct', 0),
+        }
+except Exception:
+    # fallback: küçük demo list
+    market = {
+        'THYAO': {'name': 'Türk Hava Yolları', 'sector': 'Ulaştırma', 'price': 304.4, 'change_pct': 2.1},
+        'ASELS': {'name': 'Aselsan', 'sector': 'Savunma', 'price': 88.3, 'change_pct': 1.7},
+        'BIMAS': {'name': 'BİM Mağazalar', 'sector': 'Perakende', 'price': 521.2, 'change_pct': -0.8},
+        'AKBNK': {'name': 'Akbank', 'sector': 'Bankacılık', 'price': 71.9, 'change_pct': 0.6},
+        'TUPRS': {'name': 'Tüpraş', 'sector': 'Enerji', 'price': 196.5, 'change_pct': -1.4},
+        'SAHOL': {'name': 'Sabancı Holding', 'sector': 'Holding', 'price': 92.4, 'change_pct': 0.9},
+    }
 
 state = {
     'cash': INITIAL_CASH,
+    'holdings': {},
+    'trades': [],
+    'next_trade_id': 1,
+}
+
+# Kripto portföy
+crypto_state = {
+    'usdt': INITIAL_CRYPTO_USDT,
     'holdings': {},
     'trades': [],
     'next_trade_id': 1,
@@ -44,6 +69,12 @@ class TradeIn(BaseModel):
     symbol: str = Field(min_length=2, max_length=10)
     side: Literal['BUY', 'SELL']
     quantity: int = Field(gt=0, le=100000)
+
+
+class CryptoTradeIn(BaseModel):
+    symbol: str = Field(min_length=2, max_length=10)
+    side: Literal['BUY', 'SELL']
+    amount: float = Field(gt=0)  # USDT miktarı
 
 
 class HoldingOut(BaseModel):
@@ -143,16 +174,59 @@ def create_trade(trade: TradeIn) -> dict:
 
 @app.get('/api/market')
 def get_market() -> list[dict]:
-    return [
-        {
-            'symbol': symbol,
-            'name': item['name'],
-            'sector': item['sector'],
-            'price': item['price'],
-            'changePct': item['change_pct'],
+    # Enrich market with weekly/monthly when possible (may be slower)
+    enriched = []
+    for symbol, item in market.items():
+        enriched.append(
+            {
+                'symbol': symbol,
+                'name': item['name'],
+                'sector': item['sector'],
+                'price': item['price'],
+                'changePct': item.get('change_pct'),
+            }
+        )
+    return enriched
+
+
+@app.post('/api/market/refresh')
+def refresh_market() -> dict:
+    """Elle veya cron ile çağrılabilecek endpoint; bist_symbols.txt'teki tüm sembolleri canlı Yukarıdan çekip market'i günceller."""
+    symbols = list(load_symbols())
+    if not symbols:
+        raise HTTPException(status_code=400, detail='bist_symbols.txt boş veya bulunamadı')
+    prices = get_all_bist_prices()
+    for sym, info in prices.items():
+        market[sym] = {
+            'name': info.get('name') or sym,
+            'sector': market.get(sym, {}).get('sector', 'Çeşitli'),
+            'price': info.get('price', 0),
+            'change_pct': info.get('change_pct', 0),
         }
-        for symbol, item in market.items()
-    ]
+    return {'updated': len(prices)}
+
+
+@app.get('/api/market/{symbol}/stats')
+def market_symbol_stats(symbol: str) -> dict:
+    """Return enriched stats for a single BIST symbol: daily/weekly/monthly changes and recent history.
+    """
+    symbol = symbol.upper()
+    if symbol not in market:
+        raise HTTPException(status_code=404, detail='Unknown BIST symbol')
+    # lazy import to avoid circular cost
+    from .services.bist import compute_period_changes, get_price_history
+
+    stats = compute_period_changes(symbol)
+    history = get_price_history(symbol, range='1mo', interval='1d')
+    return {
+        'symbol': symbol,
+        'name': market[symbol]['name'],
+        'price': market[symbol]['price'],
+        'daily_change_pct': stats.get('daily'),
+        'weekly_change_pct': stats.get('weekly'),
+        'monthly_change_pct': stats.get('monthly'),
+        'history_1m': history,
+    }
 
 
 def build_dashboard() -> dict:
@@ -340,3 +414,122 @@ def detect_emotion_tag(side: str, symbol: str, quantity: int) -> str:
     if quantity >= 300:
         return 'High conviction'
     return 'Planlı karar'
+
+
+# ============================================================================
+# KRIPTO TİCARET ENDPOİNTLERİ - Gerçek Fiyatlarla Sanal Portföy
+# ============================================================================
+
+@app.get('/api/crypto/market')
+def get_crypto_market() -> dict:
+    """Canlı kripto fiyatlarını al"""
+    prices = get_crypto_prices()
+    return {
+        'market': [
+            {
+                'symbol': symbol,
+                'name': price_data['name'],
+                'price': round(price_data['price'], 2),
+                'change_24h': round(price_data['change_24h'], 2),
+                'market_cap': int(price_data['market_cap']),
+            }
+            for symbol, price_data in prices.items()
+        ],
+        'usdt': crypto_state['usdt'],
+    }
+
+
+@app.post('/api/crypto/trades')
+def create_crypto_trade(trade: CryptoTradeIn) -> dict:
+    """Kripto alım-satım yap (gerçek fiyatlar, sanal cüzdan)"""
+    symbol = trade.symbol.upper()
+    prices = get_crypto_prices()
+    
+    if symbol not in prices:
+        raise HTTPException(status_code=404, detail='Kripto para bulunamadı')
+    
+    current_price = prices[symbol]['price']
+    holdings = crypto_state['holdings']
+    current_holding = holdings.get(symbol, {'quantity': 0, 'average_cost': current_price})
+    
+    if trade.side == 'BUY':
+        if crypto_state['usdt'] < trade.amount:
+            raise HTTPException(status_code=400, detail='Yeterli USDT yok')
+        
+        quantity = trade.amount / current_price
+        total_quantity = current_holding['quantity'] + quantity
+        blended_cost = (
+            current_holding['quantity'] * current_holding['average_cost'] + quantity * current_price
+        ) / total_quantity
+        
+        holdings[symbol] = {
+            'quantity': total_quantity,
+            'average_cost': blended_cost,
+        }
+        crypto_state['usdt'] -= trade.amount
+    else:
+        holding_value = current_holding['quantity'] * current_price
+        if holding_value < trade.amount:
+            raise HTTPException(status_code=400, detail='Satmak için yeterli kripto yok')
+        
+        quantity = trade.amount / current_price
+        remaining_quantity = current_holding['quantity'] - quantity
+        
+        if remaining_quantity < 0.00001:  # Dust
+            holdings.pop(symbol, None)
+        else:
+            holdings[symbol] = {
+                'quantity': remaining_quantity,
+                'average_cost': current_holding['average_cost'],
+            }
+        crypto_state['usdt'] += trade.amount
+    
+    # Trade kaydını tut
+    record = {
+        'id': crypto_state['next_trade_id'],
+        'symbol': symbol,
+        'side': trade.side,
+        'amount': trade.amount,
+        'price': current_price,
+        'timestamp': datetime.now(timezone.utc).strftime('%d.%m.%Y %H:%M'),
+    }
+    crypto_state['trades'].insert(0, record)
+    crypto_state['next_trade_id'] += 1
+    
+    return get_crypto_portfolio()
+
+
+@app.get('/api/crypto/portfolio')
+def get_crypto_portfolio() -> dict:
+    """Kripto portföy özeti"""
+    prices = get_crypto_prices()
+    holdings_out = []
+    portfolio_value = crypto_state['usdt']
+    
+    for symbol, position in crypto_state['holdings'].items():
+        if symbol in prices:
+            price = prices[symbol]['price']
+            value = position['quantity'] * price
+            pnl = (price - position['average_cost']) * position['quantity']
+            portfolio_value += value
+            
+            holdings_out.append({
+                'symbol': symbol,
+                'quantity': round(position['quantity'], 8),
+                'average_cost': round(position['average_cost'], 2),
+                'current_price': round(price, 2),
+                'value': round(value, 2),
+                'pnl': round(pnl, 2),
+                'pnl_pct': round((pnl / (position['average_cost'] * position['quantity']) * 100), 2) if position['quantity'] > 0 else 0,
+            })
+    
+    holdings_out.sort(key=lambda x: x['value'], reverse=True)
+    
+    return {
+        'usdt': round(crypto_state['usdt'], 2),
+        'holdings': holdings_out,
+        'trades': crypto_state['trades'][:10],
+        'portfolio_value': round(portfolio_value, 2),
+        'portfolio_pnl': round(portfolio_value - INITIAL_CRYPTO_USDT, 2),
+        'portfolio_pnl_pct': round(((portfolio_value - INITIAL_CRYPTO_USDT) / INITIAL_CRYPTO_USDT * 100), 2),
+    }

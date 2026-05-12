@@ -35,6 +35,7 @@ import {
 import { mockDashboard } from './data/mock';
 import { InsightCard } from './components/InsightCard';
 import { MetricCard } from './components/MetricCard';
+import { CryptoTrade } from './components/CryptoTrade';
 import type { DashboardData, Holding, ProfileName, StockItem } from './types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
@@ -59,38 +60,31 @@ const emptyTradeForm = {
 };
 
 function App() {
+  const [mode, setMode] = useState<'BIST' | 'CRYPTO'>('BIST');
   const [data, setData] = useState<DashboardData>(mockDashboard);
   const [loading, setLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [refreshingMarket, setRefreshingMarket] = useState(false);
   const [tradeForm, setTradeForm] = useState(emptyTradeForm);
 
-  useEffect(() => {
-    let active = true;
-
-    async function loadDashboard() {
-      try {
-        const response = await fetch(`${API_URL}/api/dashboard`);
-        if (!response.ok) throw new Error('Dashboard request failed');
-        const payload = (await response.json()) as DashboardData;
-        if (active) {
-          setData(payload);
-          setStatusMessage('Backend aktif. Canlı demo verileri yüklendi.');
-        }
-      } catch {
-        if (active) {
-          setData(mockDashboard);
-          setStatusMessage('Backend erişilemedi, demo veri ile devam ediliyor.');
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
+  async function loadDashboard() {
+    try {
+      const response = await fetch(`${API_URL}/api/dashboard`);
+      if (!response.ok) throw new Error('Dashboard request failed');
+      const payload = (await response.json()) as DashboardData;
+      setData(payload);
+      setStatusMessage('Backend aktif. Canlı demo verileri yüklendi.');
+    } catch {
+      setData(mockDashboard);
+      setStatusMessage('Backend erişilemedi, demo veri ile devam ediliyor.');
+    } finally {
+      setLoading(false);
     }
+  }
 
+  useEffect(() => {
     loadDashboard();
-    return () => {
-      active = false;
-    };
   }, []);
 
   const marketMap = useMemo(() => Object.fromEntries(data.market.map((item) => [item.symbol, item])), [data.market]);
@@ -122,6 +116,54 @@ function App() {
     }
   }
 
+  async function handleRefreshMarket() {
+    setRefreshingMarket(true);
+    setStatusMessage('BIST sembolleri ve fiyatlar güncelleniyor...');
+
+    try {
+      const response = await fetch(`${API_URL}/api/market/refresh`, { method: 'POST' });
+      if (!response.ok) throw new Error('Refresh request failed');
+      await loadDashboard();
+      setStatusMessage('BIST sembolleri yenilendi ve canlı market güncellendi.');
+    } catch {
+      setStatusMessage('Market yenileme başarısız oldu. Backend açık mı kontrol et.');
+    } finally {
+      setRefreshingMarket(false);
+    }
+  }
+
+  // Kripto ticaret modunu göster
+  if (mode === 'CRYPTO') {
+    return (
+      <>
+        {/* Mod Seçim Butonu */}
+        <div className="fixed top-4 right-4 z-50 bg-slate-900/95 border border-slate-700 rounded-lg p-2 flex gap-2">
+          <button
+            onClick={() => setMode('BIST')}
+            className={`px-3 py-1 rounded font-medium transition ${
+              mode === 'BIST'
+                ? 'bg-blue-500 text-white'
+                : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+            }`}
+          >
+            📊 BIST
+          </button>
+          <button
+            onClick={() => setMode('CRYPTO')}
+            className={`px-3 py-1 rounded font-medium transition ${
+              mode === 'CRYPTO'
+                ? 'bg-purple-500 text-white'
+                : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+            }`}
+          >
+            🚀 Kripto
+          </button>
+        </div>
+        <CryptoTrade />
+      </>
+    );
+  }
+
   return (
     <main className="relative overflow-hidden bg-bg text-slate-100">
       <div className="absolute inset-0 -z-10 bg-radial-grid" />
@@ -139,6 +181,43 @@ function App() {
               <h1 className="mt-5 font-display text-4xl font-black tracking-tight text-white sm:text-5xl">
                 AI destekli sanal BIST trading ve davranışsal finans koçu.
               </h1>
+              
+              {/* Mod Seçim Butonları */}
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={() => setMode('BIST')}
+                  className={`px-4 py-2 rounded-lg font-medium text-sm transition ${
+                    mode === 'BIST'
+                      ? 'bg-blue-500/20 text-blue-300 border border-blue-400'
+                      : 'bg-slate-600/30 text-gray-400 border border-slate-600 hover:bg-slate-600/50'
+                  }`}
+                >
+                  📊 BIST Hisseleri
+                </button>
+                <button
+                  onClick={() => setMode('CRYPTO')}
+                  className={`px-4 py-2 rounded-lg font-medium text-sm transition ${
+                    mode === 'CRYPTO'
+                      ? 'bg-purple-500/20 text-purple-300 border border-purple-400'
+                      : 'bg-slate-600/30 text-gray-400 border border-slate-600 hover:bg-slate-600/50'
+                  }`}
+                >
+                  🚀 Kripto Para
+                </button>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleRefreshMarket}
+                  disabled={refreshingMarket}
+                  className="rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {refreshingMarket ? 'Güncelleniyor...' : 'BIST Güncelle'}
+                </button>
+                {statusMessage ? <p className="text-sm text-slate-300">{statusMessage}</p> : null}
+              </div>
+              
               <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">
                 Bu platform yatırım tavsiyesi vermez. Amaç, sanal portföy üzerinden işlem davranışlarını analiz etmek, duygusal karar kalıplarını görünür kılmak ve yatırım disiplini geliştirmektir.
               </p>
