@@ -1,6 +1,5 @@
-"""BIST canlı fiyat servisi - yfinance kullanarak fiyat çeker."""
+"""BIST canlı fiyat servisi - ISYATIRIM kullanarak tüm hisseleri tek seferde çeker."""
 
-import yfinance as yf
 import httpx
 from pathlib import Path
 from typing import List, Dict
@@ -9,6 +8,7 @@ import xml.etree.ElementTree as ET
 BASE_DIR = Path(__file__).resolve().parents[1]
 SYMBOLS_FILE = BASE_DIR / "data" / "bist_symbols.txt"
 
+ISYATIRIM_URL = "https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/Data.aspx/TumHisseSenetleri"
 
 def load_symbols() -> list[str]:
     if not SYMBOLS_FILE.exists():
@@ -18,95 +18,77 @@ def load_symbols() -> list[str]:
     return lines
 
 
-def get_bist_prices(symbols: list[str]) -> dict[str, dict]:
-    """symbols: list like ['AKBNK','THYAO']
-    returns mapping symbol -> {price, change_pct}
-    """
-    if not symbols:
-        return {}
-
-    # Yahoo expects suffix .IS for Istanbul stocks
-    yahoo_symbols = " ".join(f"{s}.IS" for s in symbols)
+def get_all_bist_prices() -> dict[str, dict]:
+    """IsYatirim uzerinden tum BIST verilerini tek istekte ceker."""
+    target_symbols = set(load_symbols())
     
-    out: dict[str, dict] = {}
     try:
-        tickers = yf.Tickers(yahoo_symbols)
-        for sym in symbols:
-            ticker_name = f"{sym}.IS"
-            try:
-                t = tickers.tickers.get(ticker_name)
-                if not t:
-                    continue
-                # fast_info is much faster and less prone to failures than .info
-                price = t.fast_info.get("lastPrice", 0)
-                prev_close = t.fast_info.get("previousClose", 0)
-                change_pct = ((price - prev_close) / prev_close * 100) if prev_close else 0
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get("https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/Data.aspx/TumHisseSenetleri")
+            resp.raise_for_status()
+            data = resp.json()
+            
+            # API returns a list of dictionaries directly
+            if not isinstance(data, list):
+                # Fallback if it ever changes back to an object with 'data'
+                data = data.get('data', [])
                 
-                out[sym] = {
+            prices = {}
+            for item in data:
+                # The API uses 'symbol', 'last', 'dayClose'
+                sym = item.get('symbol') or item.get('kod')
+                if not sym:
+                    continue
+                
+                # Eger sembol listemizde (bist_symbols.txt) varsa isliyoruz
+                # Eger liste bossa (hata durumunda) gelen tum sembolleri isleyelim
+                if target_symbols and sym not in target_symbols:
+                    continue
+                    
+                price = item.get('last') or item.get('kapanis') or 0
+                prev_close = item.get('dayClose') or price
+                
+                change_pct = 0
+                if prev_close > 0:
+                    change_pct = ((price - prev_close) / prev_close) * 100
+                
+                prices[sym] = {
                     "price": float(price),
                     "change_pct": round(float(change_pct), 2),
-                    "name": sym # Fallback to symbol name for speed
+                    "name": sym
                 }
-            except Exception:
-                continue
-        return out
+        return prices
     except Exception as e:
-        print(f"yfinance BIST fiyat çekme hatası: {e}")
-        return {}
+        print(f"IsYatirim API hatası: {e}")
+        return {"ERROR": {"name": str(e), "price": 0, "change_pct": 0}}
 
 
-def get_all_bist_prices() -> dict[str, dict]:
-    syms = load_symbols()
-    return get_bist_prices(syms)
+def get_bist_prices(symbols: list[str]) -> dict[str, dict]:
+    """Belirli sembollerin fiyatlarini dondurur."""
+    all_prices = get_all_bist_prices()
+    if not symbols:
+        return all_prices
+    
+    return {s: all_prices[s] for s in symbols if s in all_prices}
 
 
 def get_price_history(symbol: str, range: str = "1mo", interval: str = "1d") -> list[dict]:
-    """Return list of {'timestamp': int, 'close': float} for the given symbol."""
-    try:
-        ticker = yf.Ticker(f"{symbol}.IS")
-        hist = ticker.history(period=range, interval=interval)
-        if hist.empty:
-            return []
-            
-        out = []
-        for index, row in hist.iterrows():
-            out.append({"timestamp": int(index.timestamp()), "close": float(row["Close"])})
-        return out
-    except Exception as e:
-        print(f"Price history hata: {e}")
-        return []
+    """IsYatirim icin gecmis data su an aktif degil, bos donduruyoruz."""
+    return []
 
 
 def compute_period_changes(symbol: str) -> dict:
-    """Compute daily (from quote), weekly (7d), monthly (30d) percent changes when possible.
-    Returns dict with keys: daily, weekly, monthly (floats or None).
-    """
-    quote_prices = get_bist_prices([symbol])
-    latest = quote_prices.get(symbol, {})
+    """Sadece gunluk degisim destegi var."""
+    prices = get_all_bist_prices()
+    latest = prices.get(symbol, {})
     daily = latest.get("change_pct")
-
-    history = get_price_history(symbol, range="1mo", interval="1d")
-    weekly = None
-    monthly = None
-    try:
-        if history:
-            # history is ordered oldest->newest
-            closes = [p["close"] for p in history]
-            latest_close = closes[-1]
-            if len(closes) >= 8:
-                past7 = closes[-8]
-                weekly = (latest_close - past7) / past7 * 100 if past7 != 0 else None
-            if len(closes) >= 31:
-                past30 = closes[-31]
-                monthly = (latest_close - past30) / past30 * 100 if past30 != 0 else None
-    except Exception:
-        pass
 
     return {
         "daily": round(daily, 2) if isinstance(daily, (int, float)) else None,
-        "weekly": round(weekly, 2) if isinstance(weekly, (int, float)) else None,
-        "monthly": round(monthly, 2) if isinstance(monthly, (int, float)) else None
+        "weekly": None,
+        "monthly": None
     }
+
 
 def get_market_news() -> list[dict]:
     """Fetch economy news from TRT Haber RSS."""
@@ -120,7 +102,7 @@ def get_market_news() -> list[dict]:
             items = root.findall('.//item')
             
             news_list = []
-            for item in items[:15]:  # Limit to 15 news
+            for item in items[:15]:
                 title = item.find('title')
                 link = item.find('link')
                 pubDate = item.find('pubDate')

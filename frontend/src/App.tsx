@@ -96,8 +96,10 @@ function App() {
       <div className="p-4 lg:p-8 max-w-7xl mx-auto space-y-6 animate-fade-in">
         <h2 className="text-2xl font-bold text-arena-text">Piyasa Ekranı</h2>
         <section className="grid gap-6 xl:grid-cols-2">
-          <Panel title="Piyasa İzleme" subtitle="BIST hisseleri" icon={<Users className="h-5 w-5" />}>
-            <div className="grid gap-3 sm:grid-cols-2">{data.market.map(s=><MarketCard key={s.symbol} stock={s} />)}</div>
+          <Panel title="Piyasa İzleme" subtitle={`${data.market.length} BIST hissesi listeleniyor`} icon={<Users className="h-5 w-5" />}>
+            <div className="grid gap-3 sm:grid-cols-2 h-[700px] overflow-y-auto pr-2 custom-scrollbar">
+              {data.market.slice(0, 100).map(s=><MarketCard key={s.symbol} stock={s} />)}
+            </div>
           </Panel>
           <NewsFeed />
         </section>
@@ -356,10 +358,10 @@ function App() {
   }
 
   return (
-    <div className="flex min-h-screen bg-arena-bg">
+    <div className="min-h-screen bg-arena-bg">
       <Sidebar activePage={page} onNavigate={navTo} mobileOpen={mob} onMobileToggle={()=>setMob(!mob)} />
-      <div className="flex-1 lg:ml-[260px]">
-        <MarketTicker market={data.market} />
+      <div className="md:ml-[260px]">
+        <MarketTicker market={data.market.slice(0, 100)} />
         {renderPageContent()}
       </div>
     </div>

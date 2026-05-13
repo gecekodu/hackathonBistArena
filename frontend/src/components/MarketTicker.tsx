@@ -8,8 +8,9 @@ type MarketTickerProps = {
 export function MarketTicker({ market }: MarketTickerProps) {
   if (!market.length) return null;
 
-  // Duplicate the items for seamless infinite scroll
-  const items = [...market, ...market];
+  // Sınırlı sayıda hisse alıp kopyalıyoruz (Performans ve GPU limiti için)
+  const displayItems = market.slice(0, 30);
+  const items = [...displayItems, ...displayItems];
 
   return (
     <div className="w-full border-b border-arena-border bg-white shadow-ticker">

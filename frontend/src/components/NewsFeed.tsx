@@ -58,7 +58,9 @@ export function NewsFeed() {
                 {item.description}
               </p>
               <p className="mt-3 text-[10px] text-arena-textMuted uppercase font-medium tracking-wider">
-                {new Date(item.pubDate).toLocaleString('tr-TR')}
+                {item.pubDate && !isNaN(new Date(item.pubDate).getTime()) 
+                  ? new Date(item.pubDate).toLocaleString('tr-TR') 
+                  : 'GÜNCEL'}
               </p>
             </a>
           ))
